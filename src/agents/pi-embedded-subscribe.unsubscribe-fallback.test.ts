@@ -29,7 +29,9 @@ function onAgentEventLifecycleCalls(fn: ReturnType<typeof vi.fn>): LifecycleEven
 
 describe("subscribeEmbeddedPiSession unsubscribe terminal lifecycle fallback", () => {
   beforeEach(() => {
-    emitAgentEventMock.mockClear();
+    // mockReset clears both calls and any per-test mockImplementation so tests
+    // that customize emit behavior (e.g. ordering) don't leak into later cases.
+    emitAgentEventMock.mockReset();
   });
 
   it("emits a synthetic phase:end lifecycle event when unsubscribe runs without a prior agent_end", () => {
@@ -173,6 +175,14 @@ describe("subscribeEmbeddedPiSession unsubscribe terminal lifecycle fallback", (
     });
     expect(typeof lifecycleCalls[0]?.data?.error).toBe("string");
     expect((lifecycleCalls[0]?.data?.error as string).length).toBeGreaterThan(0);
+
+    const observerCalls = onAgentEventLifecycleCalls(onAgentEvent);
+    expect(observerCalls).toHaveLength(1);
+    expect(observerCalls[0]).toMatchObject({
+      stream: "lifecycle",
+      data: { phase: "error", livenessState: "blocked" },
+    });
+    expect(typeof observerCalls[0]?.data?.error).toBe("string");
   });
 
   it("respects replayInvalid set via setTerminalLifecycleMeta before unsubscribe", () => {

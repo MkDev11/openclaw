@@ -280,7 +280,11 @@ export function emitFallbackTerminalLifecycle(ctx: EmbeddedPiSubscribeContext): 
       provider: lastAssistant.provider,
       model: lastAssistant.model,
     });
-    errorText = (friendlyError || lastAssistant.errorMessage || "LLM request failed.").trim();
+    const rawText = (friendlyError || lastAssistant.errorMessage || "LLM request failed.").trim();
+    // Redact via buildTextObservationFields to match handleAgentEnd's emit safety.
+    errorText =
+      buildTextObservationFields(rawText, { provider: lastAssistant.provider }).textPreview ??
+      "LLM request failed.";
   }
 
   try {
