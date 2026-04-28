@@ -30,6 +30,23 @@ describe("Dockerfile", () => {
     expect(dockerfile).not.toContain("OPENCLAW_VARIANT");
   });
 
+  it("installs CA certificates in the slim runtime stage", async () => {
+    const dockerfile = await readFile(dockerfilePath, "utf8");
+    const collapsed = collapseDockerContinuations(dockerfile);
+    const runtimeIndex = collapsed.indexOf(
+      "FROM ${OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE} AS base-runtime",
+    );
+    const caInstallIndex = collapsed.indexOf(
+      "ca-certificates procps hostname curl git lsof openssl",
+    );
+
+    expect(runtimeIndex).toBeGreaterThan(-1);
+    expect(caInstallIndex).toBeGreaterThan(runtimeIndex);
+    expect(caInstallIndex).toBeLessThan(collapsed.indexOf("RUN chown node:node /app"));
+    expect(collapsed).toMatch(/apt-get install -y --no-install-recommends\s+ca-certificates/);
+    expect(collapsed).toContain("update-ca-certificates");
+  });
+
   it("installs optional browser dependencies after pnpm install", async () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
     const installIndex = dockerfile.indexOf("pnpm install --frozen-lockfile");
@@ -115,6 +132,26 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain("ENV COREPACK_HOME=/usr/local/share/corepack");
     expect(dockerfile).toContain(
       'corepack prepare "$(node -p "require(\'./package.json\').packageManager")" --activate',
+    );
+  });
+
+  it("pre-creates the OpenClaw home before switching to the node user", async () => {
+    const dockerfile = await readFile(dockerfilePath, "utf8");
+    const runtimeStageIndex = dockerfile.lastIndexOf("FROM base-runtime");
+    const stateDirIndex = dockerfile.indexOf(
+      "RUN install -d -m 0700 -o node -g node /home/node/.openclaw && \\",
+      runtimeStageIndex,
+    );
+    const userIndex = dockerfile.indexOf("USER node", runtimeStageIndex);
+
+    expect(runtimeStageIndex).toBeGreaterThan(-1);
+    expect(stateDirIndex).toBeGreaterThan(-1);
+    expect(userIndex).toBeGreaterThan(-1);
+    expect(stateDirIndex).toBeGreaterThan(runtimeStageIndex);
+    expect(stateDirIndex).toBeLessThan(userIndex);
+    expect(dockerfile).not.toContain("mkdir -p /home/node/.openclaw");
+    expect(dockerfile).toContain(
+      "stat -c '%U:%G %a' /home/node/.openclaw | grep -qx 'node:node 700'",
     );
   });
 });

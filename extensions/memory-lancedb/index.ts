@@ -6,16 +6,22 @@
  * Provides seamless auto-recall and auto-capture via lifecycle hooks.
  */
 
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import type * as LanceDB from "@lancedb/lancedb";
 import OpenAI from "openai";
-import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/config-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-types";
+import { resolveLivePluginConfigObject } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { ensureGlobalUndiciEnvProxyDispatcher } from "openclaw/plugin-sdk/runtime-env";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
+import {
+  normalizeLowercaseStringOrEmpty,
+  truncateUtf16Safe,
+} from "openclaw/plugin-sdk/text-runtime";
 import { Type } from "typebox";
 import { definePluginEntry, type OpenClawPluginApi } from "./api.js";
 import {
   DEFAULT_CAPTURE_MAX_CHARS,
+  DEFAULT_RECALL_MAX_CHARS,
   MEMORY_CATEGORIES,
   type MemoryCategory,
   memoryConfigSchema,
@@ -75,6 +81,25 @@ function extractUserTextContent(message: unknown): string[] {
     }
   }
   return texts;
+}
+
+function extractLatestUserText(messages: unknown[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const text = extractUserTextContent(messages[index]).join("\n").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return undefined;
+}
+
+export function normalizeRecallQuery(
+  text: string,
+  maxChars: number = DEFAULT_RECALL_MAX_CHARS,
+): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const limit = Math.max(0, Math.floor(maxChars));
+  return normalized.length > limit ? truncateUtf16Safe(normalized, limit).trimEnd() : normalized;
 }
 
 function messageFingerprint(message: unknown): string {
@@ -246,15 +271,50 @@ class Embeddings {
     const params: OpenAI.EmbeddingCreateParams = {
       model: this.model,
       input: text,
-      encoding_format: "float",
     };
     if (this.dimensions) {
       params.dimensions = this.dimensions;
     }
     ensureGlobalUndiciEnvProxyDispatcher();
-    const response = await this.client.embeddings.create(params);
-    return response.data[0].embedding;
+    // The OpenAI SDK's embeddings helper injects encoding_format=base64 when
+    // omitted, then decodes the response. Several compatible providers either
+    // reject encoding_format or always return float arrays, so use the generic
+    // transport and normalize the response ourselves.
+    const response = await this.client.post<EmbeddingCreateResponse>("/embeddings", {
+      body: params,
+    });
+    return normalizeEmbeddingVector(response.data?.[0]?.embedding);
   }
+}
+
+type EmbeddingCreateResponse = {
+  data?: Array<{
+    embedding?: unknown;
+  }>;
+};
+
+export function normalizeEmbeddingVector(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    if (!value.every((item) => typeof item === "number" && Number.isFinite(item))) {
+      throw new Error("Embedding response contains non-numeric values");
+    }
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const bytes = Buffer.from(value, "base64");
+    if (bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+      throw new Error("Base64 embedding response has invalid byte length");
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const floats: number[] = [];
+    for (let offset = 0; offset < bytes.byteLength; offset += Float32Array.BYTES_PER_ELEMENT) {
+      floats.push(view.getFloat32(offset, true));
+    }
+    return floats;
+  }
+
+  throw new Error("Embedding response is missing a vector");
 }
 
 // ============================================================================
@@ -381,7 +441,9 @@ export default definePluginEntry({
     const autoCaptureCursors = new Map<string, AutoCaptureCursor>();
     const resolveCurrentHookConfig = () => {
       const runtimePluginConfig = resolveLivePluginConfigObject(
-        api.runtime.config?.loadConfig,
+        api.runtime.config?.current
+          ? () => api.runtime.config.current() as OpenClawConfig
+          : undefined,
         "memory-lancedb",
         api.pluginConfig as Record<string, unknown>,
       );
@@ -427,7 +489,10 @@ export default definePluginEntry({
         async execute(_toolCallId, params) {
           const { query, limit = 5 } = params as { query: string; limit?: number };
 
-          const vector = await embeddings.embed(query);
+          const currentCfg = resolveCurrentHookConfig();
+          const vector = await embeddings.embed(
+            normalizeRecallQuery(query, currentCfg.recallMaxChars),
+          );
           const results = await db.search(vector, limit, 0.1);
 
           if (results.length === 0) {
@@ -546,7 +611,10 @@ export default definePluginEntry({
           }
 
           if (query) {
-            const vector = await embeddings.embed(query);
+            const currentCfg = resolveCurrentHookConfig();
+            const vector = await embeddings.embed(
+              normalizeRecallQuery(query, currentCfg.recallMaxChars),
+            );
             const results = await db.search(vector, 5, 0.7);
 
             if (results.length === 0) {
@@ -618,7 +686,7 @@ export default definePluginEntry({
           .argument("<query>", "Search query")
           .option("--limit <n>", "Max results", "5")
           .action(async (query, opts) => {
-            const vector = await embeddings.embed(query);
+            const vector = await embeddings.embed(normalizeRecallQuery(query, cfg.recallMaxChars));
             const results = await db.search(vector, Number.parseInt(opts.limit, 10), 0.3);
             // Strip vectors for output
             const output = results.map((r) => ({
@@ -657,7 +725,12 @@ export default definePluginEntry({
       }
 
       try {
-        const vector = await embeddings.embed(event.prompt);
+        const recallQuery = normalizeRecallQuery(
+          extractLatestUserText(Array.isArray(event.messages) ? event.messages : []) ??
+            event.prompt,
+          currentCfg.recallMaxChars,
+        );
+        const vector = await embeddings.embed(recallQuery);
         const results = await db.search(vector, 3, 0.3);
 
         if (results.length === 0) {

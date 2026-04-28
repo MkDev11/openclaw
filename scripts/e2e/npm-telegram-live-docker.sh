@@ -249,6 +249,12 @@ for (const packageJsonPath of [
     types: "./extensions/qa-channel/src/protocol.ts",
     default: "./extensions/qa-channel/src/protocol.ts",
   };
+  if (!pkg.exports["./plugin-sdk/gateway-runtime"]) {
+    pkg.exports["./plugin-sdk/gateway-runtime"] = {
+      types: "./dist/plugin-sdk/browser-node-runtime.d.ts",
+      default: "./dist/plugin-sdk/browser-node-runtime.js",
+    };
+  }
   fs.writeFileSync(packageJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 NODE
@@ -277,6 +283,27 @@ for deps_dir in "$openclaw_package_dir/node_modules" /npm-global/lib/node_module
         ;;
     esac
   done
+done
+
+link_installed_package_dependency() {
+  local name="$1"
+  local source="/npm-global/lib/node_modules/openclaw/node_modules/$name"
+  local target="/app/node_modules/$name"
+  if [ ! -e "$source" ]; then
+    echo "Installed package dependency is missing: $name" >&2
+    return 1
+  fi
+  mkdir -p "$(dirname "$target")"
+  ln -sfn "$source" "$target"
+}
+
+# QA Lab is intentionally mounted as harness source, so its package-local
+# runtime imports must resolve from the installed package dependency tree.
+for dependency in \
+  @modelcontextprotocol/sdk \
+  yaml \
+  zod; do
+  link_installed_package_dependency "$dependency"
 done
 
 echo "Running installed-package onboarding recovery hot path..."
