@@ -476,6 +476,54 @@ describe("skills-clawhub", () => {
       });
     });
 
+    it("rejects invalid owner prefixes on update even when the bare slug is already tracked", async () => {
+      const slug = "skill-vetter";
+      const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skills-clawhub-"));
+      const skillDir = path.join(workspaceDir, "skills", slug);
+      await fs.mkdir(path.join(skillDir, ".clawhub"), { recursive: true });
+      await fs.mkdir(path.join(workspaceDir, ".clawhub"), { recursive: true });
+      await fs.writeFile(
+        path.join(skillDir, ".clawhub", "origin.json"),
+        `${JSON.stringify(
+          {
+            version: 1,
+            registry: "https://legacy.clawhub.ai",
+            slug,
+            installedVersion: "0.9.0",
+            installedAt: 123,
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(workspaceDir, ".clawhub", "lock.json"),
+        `${JSON.stringify(
+          {
+            version: 1,
+            skills: { [slug]: { version: "0.9.0", installedAt: 123 } },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+
+      try {
+        await expect(
+          updateSkillsFromClawHub({
+            workspaceDir,
+            slug: `owner_1/${slug}`,
+          }),
+        ).rejects.toThrow("Invalid skill slug");
+        expect(fetchClawHubSkillDetailMock).not.toHaveBeenCalled();
+        expect(downloadClawHubSkillArchiveMock).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(workspaceDir, { recursive: true, force: true });
+      }
+    });
+
     it("updates a bare-slug install when invoked with the owner-prefixed form", async () => {
       const slug = "skill-vetter";
       const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skills-clawhub-"));

@@ -102,7 +102,10 @@ async function resolveRequestedUpdateSlug(params: {
   requestedSlug: string;
   lock: ClawHubSkillsLockfile;
 }): Promise<string> {
-  const trackedSlug = normalizeTrackedSlug(params.requestedSlug);
+  const raw = params.requestedSlug.trim();
+  const trackedSlug = raw.includes("/")
+    ? parseClawHubSkillSlug(params.requestedSlug, "requested")
+    : normalizeTrackedSlug(params.requestedSlug);
   const trackedTargetDir = resolveSkillInstallDir(params.workspaceDir, trackedSlug);
   const trackedOrigin = await readClawHubSkillOrigin(trackedTargetDir);
   if (trackedOrigin || params.lock.skills[trackedSlug]) {
