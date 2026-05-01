@@ -24,6 +24,7 @@ export {
 export type {
   QaBusAttachment,
   QaBusConversation,
+  QaBusConversationKind,
   QaBusCreateThreadInput,
   QaBusDeleteMessageInput,
   QaBusEditMessageInput,
@@ -39,4 +40,4 @@ export type {
   QaBusStateSnapshot,
   QaBusThread,
   QaBusWaitForInput,
-} from "openclaw/plugin-sdk/qa-channel";
+} from "./protocol.js";

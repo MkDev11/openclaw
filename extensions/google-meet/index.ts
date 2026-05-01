@@ -118,7 +118,16 @@ const googleMeetConfigSchema = {
       label: "Voice Call Request Timeout (ms)",
       advanced: true,
     },
-    "voiceCall.dtmfDelayMs": { label: "DTMF Delay (ms)", advanced: true },
+    "voiceCall.dtmfDelayMs": {
+      label: "Legacy DTMF Delay (ms)",
+      help: "Compatibility setting from the old post-connect DTMF flow. Twilio Meet joins now play DTMF before realtime connect.",
+      advanced: true,
+    },
+    "voiceCall.postDtmfSpeechDelayMs": {
+      label: "Legacy Post-DTMF Speech Delay (ms)",
+      help: "Compatibility setting from the old delayed-speech flow. Twilio Meet joins now carry the intro as the initial Voice Call message.",
+      advanced: true,
+    },
     "voiceCall.introMessage": { label: "Voice Call Intro Message", advanced: true },
     "realtime.provider": {
       label: "Realtime Provider",
@@ -677,7 +686,13 @@ export default definePluginEntry({
       async ({ params, respond }: GatewayRequestHandlerOptions) => {
         try {
           const rt = await ensureRuntime();
-          respond(true, await rt.setupStatus({ transport: normalizeTransport(params?.transport) }));
+          respond(
+            true,
+            await rt.setupStatus({
+              transport: normalizeTransport(params?.transport),
+              mode: normalizeMode(params?.mode),
+            }),
+          );
         } catch (err) {
           sendError(respond, err);
         }
@@ -817,7 +832,7 @@ export default definePluginEntry({
             return;
           }
           const rt = await ensureRuntime();
-          respond(true, rt.speak(sessionId, normalizeOptionalString(params?.message)));
+          respond(true, await rt.speak(sessionId, normalizeOptionalString(params?.message)));
         } catch (err) {
           sendError(respond, err);
         }

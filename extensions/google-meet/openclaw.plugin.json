@@ -5,6 +5,7 @@
   "enabledByDefault": false,
   "commandAliases": [{ "name": "googlemeet" }],
   "activation": {
+    "onStartup": true,
     "onCommands": ["googlemeet"],
     "onCapabilities": ["tool"]
   },
@@ -111,7 +112,8 @@
       "advanced": true
     },
     "voiceCall.dtmfDelayMs": {
-      "label": "DTMF Delay (ms)",
+      "label": "Legacy DTMF Delay (ms)",
+      "help": "Compatibility setting from the old post-connect DTMF flow. Twilio Meet joins now play DTMF before realtime connect.",
       "advanced": true
     },
     "voiceCall.introMessage": {

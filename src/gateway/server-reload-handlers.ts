@@ -1,6 +1,7 @@
 import { resetModelCatalogCache } from "../agents/model-catalog.js";
 import { disposeAllSessionMcpRuntimes } from "../agents/pi-bundle-mcp-tools.js";
 import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/run-state.js";
+import { abortEmbeddedPiRun } from "../agents/pi-embedded-runner/runs.js";
 import { getTotalPendingReplies } from "../auto-reply/reply/dispatcher-registry.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { isRestartEnabled } from "../config/commands.flags.js";
@@ -11,6 +12,7 @@ import { resetDirectoryCache } from "../infra/outbound/target-resolver.js";
 import {
   deferGatewayRestartUntilIdle,
   emitGatewayRestart,
+  resolveGatewayRestartDeferralTimeoutMs,
   setGatewaySigusr1RestartPolicy,
 } from "../infra/restart.js";
 import { getTotalQueueSize } from "../process/command-queue.js";
@@ -27,6 +29,7 @@ import { startGatewayConfigReloader, type GatewayReloadPlan } from "./config-rel
 import { resolveHooksConfig } from "./hooks.js";
 import { buildGatewayCronService, type GatewayCronState } from "./server-cron.js";
 import { applyGatewayLaneConcurrency } from "./server-lanes.js";
+import { markGatewayModelCatalogStaleForReload } from "./server-model-catalog.js";
 import {
   type GatewayChannelManager,
   startGatewayChannelHealthMonitor,
@@ -58,6 +61,23 @@ type GatewayReloadLog = {
 const MCP_RUNTIME_RELOAD_DISPOSE_TIMEOUT_MS = 5_000;
 const CHANNEL_RELOAD_DEFERRAL_POLL_MS = 500;
 const CHANNEL_RELOAD_STILL_PENDING_WARN_MS = 30_000;
+
+function abortActiveAgentRunsAfterConfigRecovery(params: {
+  reason: string;
+  logReload: GatewayReloadLog;
+}) {
+  const aborted = abortEmbeddedPiRun(undefined, { mode: "all" });
+  if (!aborted) {
+    return;
+  }
+  params.logReload.warn(
+    `config recovery aborted active agent run(s) after reload-${params.reason}`,
+  );
+}
+
+export const __testing = {
+  abortActiveAgentRunsAfterConfigRecovery,
+};
 
 async function disposeMcpRuntimesWithTimeout(params: {
   dispose: () => Promise<void>;
@@ -222,6 +242,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       )
     ) {
       resetModelCatalogCache();
+      markGatewayModelCatalogStaleForReload();
     }
 
     if (plan.reloadHooks) {
@@ -345,7 +366,9 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
 
       deferGatewayRestartUntilIdle({
         getPendingCount: () => getActiveCounts().totalActive,
-        maxWaitMs: nextConfig.gateway?.reload?.deferralTimeoutMs,
+        maxWaitMs: resolveGatewayRestartDeferralTimeoutMs(
+          nextConfig.gateway?.reload?.deferralTimeoutMs,
+        ),
         hooks: {
           onReady: () => {
             restartPending = false;
@@ -418,11 +441,13 @@ export function startManagedGatewayConfigReloader(params: ManagedGatewayConfigRe
       await params.recoverSnapshot({ snapshot, reason: `reload-${reason}` }),
     promoteSnapshot: async (snapshot, _reason) => await params.promoteSnapshot(snapshot),
     onRecovered: ({ reason, snapshot, recoveredSnapshot }) => {
+      abortActiveAgentRunsAfterConfigRecovery({ reason, logReload: params.logReload });
       enqueueConfigRecoveryNotice({
         cfg: recoveredSnapshot.config,
         phase: "reload",
         reason: `reload-${reason}`,
         configPath: snapshot.path,
+        issues: [...snapshot.issues, ...snapshot.legacyIssues],
       });
     },
     subscribeToWrites: params.subscribeToWrites,

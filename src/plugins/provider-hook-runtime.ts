@@ -1,10 +1,8 @@
 import { normalizeProviderId } from "../agents/provider-id.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
-import { normalizePluginIdScope, serializePluginIdScope } from "./plugin-scope.js";
 import { resolveProviderConfigApiOwnerHint } from "./provider-config-owner.js";
 import { isPluginProvidersLoadInFlight, resolvePluginProviders } from "./providers.runtime.js";
-import { resolvePluginCacheInputs } from "./roots.js";
 import { getActivePluginRegistryWorkspaceDirFromState } from "./runtime-state.js";
 import type {
   ProviderPlugin,
@@ -15,6 +13,22 @@ import type {
   ProviderFollowupFallbackRouteResult,
   ProviderWrapStreamFnContext,
 } from "./types.js";
+
+const providerRuntimePluginCache = new WeakMap<
+  OpenClawConfig,
+  Map<string, ProviderPlugin | null>
+>();
+
+type ProviderRuntimePluginLookupParams = {
+  provider: string;
+  config?: OpenClawConfig;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  applyAutoEnable?: boolean;
+  bundledProviderAllowlistCompat?: boolean;
+  bundledProviderVitestCompat?: boolean;
+  installBundledRuntimeDeps?: boolean;
+};
 
 function matchesProviderId(provider: ProviderPlugin, providerId: string): boolean {
   const normalized = normalizeProviderId(providerId);
@@ -29,79 +43,37 @@ function matchesProviderId(provider: ProviderPlugin, providerId: string): boolea
   );
 }
 
+function resolveProviderRuntimePluginCacheKey(params: ProviderRuntimePluginLookupParams): string {
+  return JSON.stringify({
+    provider: normalizeLowercaseStringOrEmpty(params.provider),
+    plugins: params.config?.plugins,
+    models: params.config?.models?.providers,
+    workspaceDir: params.workspaceDir ?? "",
+    applyAutoEnable: params.applyAutoEnable ?? null,
+    bundledProviderAllowlistCompat: params.bundledProviderAllowlistCompat ?? null,
+    bundledProviderVitestCompat: params.bundledProviderVitestCompat ?? null,
+    installBundledRuntimeDeps: params.installBundledRuntimeDeps ?? null,
+  });
+}
+
+function resolveProviderRuntimePluginCache(
+  params: ProviderRuntimePluginLookupParams,
+): Map<string, ProviderPlugin | null> | undefined {
+  if (!params.config || (params.env && params.env !== process.env)) {
+    return undefined;
+  }
+  let cache = providerRuntimePluginCache.get(params.config);
+  if (!cache) {
+    cache = new Map();
+    providerRuntimePluginCache.set(params.config, cache);
+  }
+  return cache;
+}
+
 function matchesProviderLiteralId(provider: ProviderPlugin, providerId: string): boolean {
   const normalized = normalizeLowercaseStringOrEmpty(providerId);
   return !!normalized && normalizeLowercaseStringOrEmpty(provider.id) === normalized;
 }
-
-let cachedHookProvidersWithoutConfig = new WeakMap<
-  NodeJS.ProcessEnv,
-  Map<string, ProviderPlugin[]>
->();
-let cachedHookProvidersByConfig = new WeakMap<
-  OpenClawConfig,
-  WeakMap<NodeJS.ProcessEnv, Map<string, ProviderPlugin[]>>
->();
-
-function resolveHookProviderCacheBucket(params: {
-  config?: OpenClawConfig;
-  env: NodeJS.ProcessEnv;
-}) {
-  if (!params.config) {
-    let bucket = cachedHookProvidersWithoutConfig.get(params.env);
-    if (!bucket) {
-      bucket = new Map<string, ProviderPlugin[]>();
-      cachedHookProvidersWithoutConfig.set(params.env, bucket);
-    }
-    return bucket;
-  }
-
-  let envBuckets = cachedHookProvidersByConfig.get(params.config);
-  if (!envBuckets) {
-    envBuckets = new WeakMap<NodeJS.ProcessEnv, Map<string, ProviderPlugin[]>>();
-    cachedHookProvidersByConfig.set(params.config, envBuckets);
-  }
-  let bucket = envBuckets.get(params.env);
-  if (!bucket) {
-    bucket = new Map<string, ProviderPlugin[]>();
-    envBuckets.set(params.env, bucket);
-  }
-  return bucket;
-}
-
-function buildHookProviderCacheKey(params: {
-  config?: OpenClawConfig;
-  workspaceDir?: string;
-  onlyPluginIds?: string[];
-  providerRefs?: string[];
-  env?: NodeJS.ProcessEnv;
-}) {
-  const { roots } = resolvePluginCacheInputs({
-    workspaceDir: params.workspaceDir,
-    env: params.env,
-  });
-  const onlyPluginIds = normalizePluginIdScope(params.onlyPluginIds);
-  return `${roots.workspace ?? ""}::${roots.global}::${roots.stock ?? ""}::${JSON.stringify(params.config ?? null)}::${serializePluginIdScope(onlyPluginIds)}::${JSON.stringify(params.providerRefs ?? [])}`;
-}
-
-export function clearProviderRuntimeHookCache(): void {
-  cachedHookProvidersWithoutConfig = new WeakMap<
-    NodeJS.ProcessEnv,
-    Map<string, ProviderPlugin[]>
-  >();
-  cachedHookProvidersByConfig = new WeakMap<
-    OpenClawConfig,
-    WeakMap<NodeJS.ProcessEnv, Map<string, ProviderPlugin[]>>
-  >();
-}
-
-export function resetProviderRuntimeHookCacheForTest(): void {
-  clearProviderRuntimeHookCache();
-}
-
-export const __testing = {
-  buildHookProviderCacheKey,
-} as const;
 
 export function resolveProviderPluginsForHooks(params: {
   config?: OpenClawConfig;
@@ -116,28 +88,12 @@ export function resolveProviderPluginsForHooks(params: {
 }): ProviderPlugin[] {
   const env = params.env ?? process.env;
   const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
-  const cacheBucket = resolveHookProviderCacheBucket({
-    config: params.config,
-    env,
-  });
-  const cacheKey = buildHookProviderCacheKey({
-    config: params.config,
-    workspaceDir,
-    onlyPluginIds: params.onlyPluginIds,
-    providerRefs: params.providerRefs,
-    env,
-  });
-  const cached = cacheBucket.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
   if (
     isPluginProvidersLoadInFlight({
       ...params,
       workspaceDir,
       env,
       activate: false,
-      cache: false,
       applyAutoEnable: params.applyAutoEnable,
       bundledProviderAllowlistCompat: params.bundledProviderAllowlistCompat ?? true,
       bundledProviderVitestCompat: params.bundledProviderVitestCompat ?? true,
@@ -151,31 +107,27 @@ export function resolveProviderPluginsForHooks(params: {
     workspaceDir,
     env,
     activate: false,
-    cache: false,
     applyAutoEnable: params.applyAutoEnable,
     bundledProviderAllowlistCompat: params.bundledProviderAllowlistCompat ?? true,
     bundledProviderVitestCompat: params.bundledProviderVitestCompat ?? true,
     installBundledRuntimeDeps: params.installBundledRuntimeDeps,
   });
-  cacheBucket.set(cacheKey, resolved);
   return resolved;
 }
 
-export function resolveProviderRuntimePlugin(params: {
-  provider: string;
-  config?: OpenClawConfig;
-  workspaceDir?: string;
-  env?: NodeJS.ProcessEnv;
-  applyAutoEnable?: boolean;
-  bundledProviderAllowlistCompat?: boolean;
-  bundledProviderVitestCompat?: boolean;
-  installBundledRuntimeDeps?: boolean;
-}): ProviderPlugin | undefined {
+export function resolveProviderRuntimePlugin(
+  params: ProviderRuntimePluginLookupParams,
+): ProviderPlugin | undefined {
+  const cache = resolveProviderRuntimePluginCache(params);
+  const cacheKey = cache ? resolveProviderRuntimePluginCacheKey(params) : "";
+  if (cache?.has(cacheKey)) {
+    return cache.get(cacheKey) ?? undefined;
+  }
   const apiOwnerHint = resolveProviderConfigApiOwnerHint({
     provider: params.provider,
     config: params.config,
   });
-  return resolveProviderPluginsForHooks({
+  const plugin = resolveProviderPluginsForHooks({
     config: params.config,
     workspaceDir: params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState(),
     env: params.env,
@@ -192,6 +144,8 @@ export function resolveProviderRuntimePlugin(params: {
     }
     return matchesProviderId(plugin, params.provider);
   });
+  cache?.set(cacheKey, plugin ?? null);
+  return plugin;
 }
 
 export function resolveProviderHookPlugin(params: {
@@ -227,7 +181,9 @@ export function resolveProviderExtraParamsForTransport(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderExtraParamsForTransportContext;
 }) {
-  return resolveProviderHookPlugin(params)?.extraParamsForTransport?.(params.context) ?? undefined;
+  return (
+    resolveProviderRuntimePlugin(params)?.extraParamsForTransport?.(params.context) ?? undefined
+  );
 }
 
 export function resolveProviderAuthProfileId(params: {
@@ -237,7 +193,7 @@ export function resolveProviderAuthProfileId(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderResolveAuthProfileIdContext;
 }): string | undefined {
-  const resolved = resolveProviderHookPlugin(params)?.resolveAuthProfileId?.(params.context);
+  const resolved = resolveProviderRuntimePlugin(params)?.resolveAuthProfileId?.(params.context);
   return typeof resolved === "string" && resolved.trim() ? resolved.trim() : undefined;
 }
 
@@ -258,5 +214,5 @@ export function wrapProviderStreamFn(params: {
   env?: NodeJS.ProcessEnv;
   context: ProviderWrapStreamFnContext;
 }) {
-  return resolveProviderHookPlugin(params)?.wrapStreamFn?.(params.context) ?? undefined;
+  return resolveProviderRuntimePlugin(params)?.wrapStreamFn?.(params.context) ?? undefined;
 }

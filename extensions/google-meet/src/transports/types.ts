@@ -19,12 +19,21 @@ export type GoogleMeetManualActionReason =
   | "meet-audio-choice-required"
   | "browser-control-unavailable";
 
+export type GoogleMeetSpeechBlockedReason =
+  | GoogleMeetManualActionReason
+  | "not-in-call"
+  | "browser-unverified"
+  | "audio-bridge-unavailable";
+
 export type GoogleMeetChromeHealth = {
   inCall?: boolean;
   micMuted?: boolean;
   manualActionRequired?: boolean;
   manualActionReason?: GoogleMeetManualActionReason;
   manualActionMessage?: string;
+  speechReady?: boolean;
+  speechBlockedReason?: GoogleMeetSpeechBlockedReason;
+  speechBlockedMessage?: string;
   providerConnected?: boolean;
   realtimeReady?: boolean;
   audioInputActive?: boolean;
@@ -77,6 +86,7 @@ export type GoogleMeetSession = {
     dtmfSequence?: string;
     voiceCallId?: string;
     dtmfSent?: boolean;
+    introSent?: boolean;
   };
   notes: string[];
 };

@@ -4,7 +4,8 @@
   "description": "Codex app-server harness and Codex-managed GPT model catalog.",
   "providers": ["codex"],
   "contracts": {
-    "mediaUnderstandingProviders": ["codex"]
+    "mediaUnderstandingProviders": ["codex"],
+    "migrationProviders": ["codex"]
   },
   "mediaUnderstandingProviderMetadata": {
     "codex": {
@@ -18,6 +19,7 @@
   "syntheticAuthRefs": ["codex"],
   "nonSecretAuthMarkers": ["codex-app-server"],
   "activation": {
+    "onStartup": false,
     "onAgentHarnesses": ["codex"]
   },
   "commandAliases": [

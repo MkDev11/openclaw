@@ -38,6 +38,17 @@ import {
   AgentsFilesSetParamsSchema,
   type AgentsFilesSetResult,
   AgentsFilesSetResultSchema,
+  type ArtifactsDownloadParams,
+  ArtifactsDownloadParamsSchema,
+  type ArtifactsDownloadResult,
+  type ArtifactsGetParams,
+  ArtifactsGetParamsSchema,
+  type ArtifactsGetResult,
+  type ArtifactsListParams,
+  ArtifactsListParamsSchema,
+  type ArtifactsListResult,
+  type ArtifactSummary,
+  ArtifactSummarySchema,
   type AgentsListParams,
   AgentsListParamsSchema,
   type AgentsListResult,
@@ -177,6 +188,8 @@ import {
   NodeDescribeParamsSchema,
   type NodeEventParams,
   NodeEventParamsSchema,
+  type NodeEventResult,
+  NodeEventResultSchema,
   type NodePendingDrainParams,
   NodePendingDrainParamsSchema,
   type NodePendingDrainResult,
@@ -185,6 +198,10 @@ import {
   NodePendingEnqueueParamsSchema,
   type NodePendingEnqueueResult,
   NodePendingEnqueueResultSchema,
+  type NodePresenceAlivePayload,
+  NodePresenceAlivePayloadSchema,
+  type NodePresenceAliveReason,
+  NodePresenceAliveReasonSchema,
   type NodeInvokeParams,
   NodeInvokeParamsSchema,
   type NodeInvokeResultParams,
@@ -361,6 +378,12 @@ export const validateAgentsFilesGetParams = ajv.compile<AgentsFilesGetParams>(
 export const validateAgentsFilesSetParams = ajv.compile<AgentsFilesSetParams>(
   AgentsFilesSetParamsSchema,
 );
+export const validateArtifactsListParams =
+  ajv.compile<ArtifactsListParams>(ArtifactsListParamsSchema);
+export const validateArtifactsGetParams = ajv.compile<ArtifactsGetParams>(ArtifactsGetParamsSchema);
+export const validateArtifactsDownloadParams = ajv.compile<ArtifactsDownloadParams>(
+  ArtifactsDownloadParamsSchema,
+);
 export const validateNodePairRequestParams = ajv.compile<NodePairRequestParams>(
   NodePairRequestParamsSchema,
 );
@@ -388,6 +411,10 @@ export const validateNodeInvokeResultParams = ajv.compile<NodeInvokeResultParams
   NodeInvokeResultParamsSchema,
 );
 export const validateNodeEventParams = ajv.compile<NodeEventParams>(NodeEventParamsSchema);
+export const validateNodeEventResult = ajv.compile<NodeEventResult>(NodeEventResultSchema);
+export const validateNodePresenceAlivePayload = ajv.compile<NodePresenceAlivePayload>(
+  NodePresenceAlivePayloadSchema,
+);
 export const validateNodePendingDrainParams = ajv.compile<NodePendingDrainParams>(
   NodePendingDrainParamsSchema,
 );
@@ -651,6 +678,9 @@ export {
   NodeListParamsSchema,
   NodePendingAckParamsSchema,
   NodeInvokeParamsSchema,
+  NodeEventResultSchema,
+  NodePresenceAlivePayloadSchema,
+  NodePresenceAliveReasonSchema,
   NodePendingDrainParamsSchema,
   NodePendingDrainResultSchema,
   NodePendingEnqueueParamsSchema,
@@ -671,6 +701,10 @@ export {
   SessionsDeleteParamsSchema,
   SessionsCompactParamsSchema,
   SessionsUsageParamsSchema,
+  ArtifactSummarySchema,
+  ArtifactsListParamsSchema,
+  ArtifactsGetParamsSchema,
+  ArtifactsDownloadParamsSchema,
   ConfigGetParamsSchema,
   ConfigSetParamsSchema,
   ConfigApplyParamsSchema,
@@ -832,6 +866,13 @@ export type {
   AgentsFilesGetResult,
   AgentsFilesSetParams,
   AgentsFilesSetResult,
+  ArtifactSummary,
+  ArtifactsListParams,
+  ArtifactsListResult,
+  ArtifactsGetParams,
+  ArtifactsGetResult,
+  ArtifactsDownloadParams,
+  ArtifactsDownloadResult,
   AgentsListParams,
   AgentsListResult,
   CommandsListParams,
@@ -857,6 +898,9 @@ export type {
   NodeInvokeParams,
   NodeInvokeResultParams,
   NodeEventParams,
+  NodeEventResult,
+  NodePresenceAlivePayload,
+  NodePresenceAliveReason,
   NodePendingDrainParams,
   NodePendingDrainResult,
   NodePendingEnqueueParams,

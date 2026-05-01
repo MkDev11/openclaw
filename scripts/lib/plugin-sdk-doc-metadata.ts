@@ -77,6 +77,9 @@ export const pluginSdkDocMetadata = {
   "command-auth": {
     category: "channel",
   },
+  zalouser: {
+    category: "channel",
+  },
   "command-status": {
     category: "channel",
   },
@@ -95,9 +98,6 @@ export const pluginSdkDocMetadata = {
   "provider-selection-runtime": {
     category: "provider",
   },
-  opencode: {
-    category: "provider",
-  },
   "runtime-store": {
     category: "runtime",
   },
@@ -113,10 +113,16 @@ export const pluginSdkDocMetadata = {
   "channel-test-helpers": {
     category: "utilities",
   },
+  "agent-runtime-test-contracts": {
+    category: "utilities",
+  },
   "channel-target-testing": {
     category: "utilities",
   },
   "provider-test-contracts": {
+    category: "utilities",
+  },
+  "provider-http-test-mocks": {
     category: "utilities",
   },
   "test-env": {
