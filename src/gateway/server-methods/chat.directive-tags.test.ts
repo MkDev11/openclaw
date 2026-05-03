@@ -716,7 +716,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     );
   });
 
-  it("does not persist agent media supplements when no playable media resolves", async () => {
+  it("persists agent final text without media supplement when no playable media resolves", async () => {
     const transcriptDir = createTranscriptFixture("openclaw-chat-send-agent-stale-tts-");
     const staleAudioPath = path.join(transcriptDir, "stale.mp3");
     mockState.config = {
@@ -755,7 +755,12 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
         update.message !== null &&
         (update.message as { role?: unknown }).role === "assistant",
     );
-    expect(assistantUpdates).toEqual([]);
+    expect(assistantUpdates).toHaveLength(1);
+    expect(extractFirstTextBlock(assistantUpdates[0])).toBe(
+      "Text-only test: one clean reply, no TTS, no media, no tool narration.",
+    );
+    expect(JSON.stringify(assistantUpdates[0]?.message)).not.toContain(staleAudioPath);
+    expect(JSON.stringify(assistantUpdates[0]?.message)).not.toContain("MEDIA:");
   });
 
   it("keeps visible text on non-agent TTS final media because no model transcript exists", async () => {
@@ -1965,6 +1970,41 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
         content: "hello from dashboard",
         timestamp: expect.any(Number),
       },
+    });
+    const finalBroadcast = (
+      context.broadcast as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.find((call) => call[0] === "chat" && call[1]?.state === "final")?.[1];
+    expect(finalBroadcast).toBeUndefined();
+  });
+
+  it("persists assistant final text when chat.send starts an agent run", async () => {
+    createTranscriptFixture("openclaw-chat-send-agent-run-assistant-transcript-");
+    mockState.finalText = "Dinner is pasta with roasted vegetables.";
+    mockState.triggerAgentRunStart = true;
+    const respond = vi.fn();
+    const context = createChatContext();
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "idem-agent-run-assistant-transcript",
+      message: "what is for dinner?",
+      expectBroadcast: false,
+    });
+
+    const assistantUpdates = mockState.emittedTranscriptUpdates.filter(
+      (update) =>
+        typeof update.message === "object" &&
+        update.message !== null &&
+        (update.message as { role?: unknown }).role === "assistant",
+    );
+    expect(assistantUpdates).toHaveLength(1);
+    expect(extractFirstTextBlock(assistantUpdates[0])).toBe(
+      "Dinner is pasta with roasted vegetables.",
+    );
+    expect(assistantUpdates[0]?.message).toMatchObject({
+      role: "assistant",
+      idempotencyKey: "idem-agent-run-assistant-transcript:assistant",
     });
     const finalBroadcast = (
       context.broadcast as unknown as ReturnType<typeof vi.fn>

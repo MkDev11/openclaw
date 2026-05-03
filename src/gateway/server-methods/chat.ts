@@ -312,6 +312,30 @@ function buildTranscriptReplyText(payloads: ReplyPayload[]): string {
   return chunks.join("\n\n").trim();
 }
 
+function buildTranscriptReplyVisibleText(payloads: ReplyPayload[]): string {
+  const chunks = payloads
+    .map((payload) => {
+      if (payload.isReasoning === true) {
+        return "";
+      }
+      const text = payload.text?.trim();
+      if (!text || isSuppressedControlReplyText(text)) {
+        return "";
+      }
+      const lines: string[] = [];
+      const replyToId = sanitizeReplyDirectiveId(payload.replyToId);
+      if (replyToId) {
+        lines.push(`[[reply_to:${replyToId}]]`);
+      } else if (payload.replyToCurrent) {
+        lines.push("[[reply_to_current]]");
+      }
+      lines.push(text);
+      return lines.join("\n").trim();
+    })
+    .filter(Boolean);
+  return chunks.join("\n\n").trim();
+}
+
 function hasSensitiveMediaPayload(payloads: ReplyPayload[]): boolean {
   return payloads.some(
     (payload) => payload.sensitiveMedia === true && isMediaBearingPayload(payload),
@@ -2331,6 +2355,37 @@ export const chatHandlers: GatewayRequestHandlers = {
           `webchat transcript append failed for media reply: ${appended.error ?? "unknown error"}`,
         );
       };
+      const appendWebchatAgentFinalTextTranscriptIfNeeded = async () => {
+        if (!agentRunStarted || appendedWebchatAgentMedia) {
+          return;
+        }
+        const finalPayloads = deliveredReplies
+          .filter((entry) => entry.kind === "final")
+          .map((entry) => entry.payload);
+        const transcriptReply = buildTranscriptReplyVisibleText(finalPayloads);
+        if (!transcriptReply) {
+          return;
+        }
+        const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey);
+        const sessionId = latestEntry?.sessionId ?? backingSessionId ?? clientRunId;
+        const appended = await appendAssistantTranscriptMessage({
+          message: transcriptReply,
+          sessionId,
+          storePath: latestStorePath,
+          sessionFile: latestEntry?.sessionFile,
+          agentId,
+          createIfMissing: true,
+          idempotencyKey: `${clientRunId}:assistant`,
+          cfg,
+        });
+        if (!appended.ok) {
+          context.logGateway.warn(
+            `webchat transcript append failed for agent-run final text: ${
+              appended.error ?? "unknown error"
+            }`,
+          );
+        }
+      };
       const dispatcher = createReplyDispatcher({
         ...replyPipeline,
         onError: (err) => {
@@ -2568,7 +2623,8 @@ export const chatHandlers: GatewayRequestHandlers = {
               });
             }
           } else {
-            void emitUserTranscriptUpdate();
+            await emitUserTranscriptUpdate();
+            await appendWebchatAgentFinalTextTranscriptIfNeeded();
           }
           if (!context.chatAbortedRuns.has(clientRunId)) {
             setGatewayDedupeEntry({
