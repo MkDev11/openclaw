@@ -310,20 +310,28 @@ function isOpenClawSessionOwnerArgv(args: string[]): boolean {
   if (exe === "openclaw" || exe.endsWith("/openclaw") || exe.endsWith("/openclaw-gateway")) {
     return true;
   }
+  if (
+    normalized.some(
+      (arg) =>
+        arg === "openclaw" ||
+        arg.endsWith("/openclaw") ||
+        arg === "openclaw.mjs" ||
+        arg.endsWith("/openclaw.mjs"),
+    )
+  ) {
+    return true;
+  }
 
   const entryCandidates = [
     "dist/index.js",
     "dist/entry.js",
-    "openclaw.mjs",
     "scripts/run-node.mjs",
     "src/entry.ts",
     "src/index.ts",
   ];
+  const hasOpenClawCommandToken = normalized.some((arg) => arg === "gateway" || arg === "agent");
   return normalized.some(
-    (arg) =>
-      arg === "openclaw" ||
-      arg.endsWith("/openclaw") ||
-      entryCandidates.some((entry) => arg.endsWith(entry)),
+    (arg) => entryCandidates.some((entry) => arg.endsWith(entry)) && hasOpenClawCommandToken,
   );
 }
 

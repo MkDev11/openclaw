@@ -455,6 +455,42 @@ describe("acquireSessionWriteLock", () => {
     }
   });
 
+  it("cleans fresh live .jsonl lock files owned by generic non-OpenClaw entrypoints", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-lock-"));
+    const sessionsDir = path.join(root, "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    const nowMs = Date.now();
+    const falseLiveLock = path.join(sessionsDir, "false-live-generic-entry.jsonl.lock");
+
+    try {
+      await fs.writeFile(
+        falseLiveLock,
+        JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date(nowMs).toISOString(),
+        }),
+        "utf8",
+      );
+
+      const result = await cleanStaleLockFiles({
+        sessionsDir,
+        staleMs: 30_000,
+        nowMs,
+        removeStale: true,
+        readOwnerProcessArgs: () => ["node", "/srv/app/dist/index.js"],
+      });
+
+      expect(result.cleaned.map((entry) => path.basename(entry.lockPath))).toEqual([
+        "false-live-generic-entry.jsonl.lock",
+      ]);
+      expect(result.cleaned[0]?.staleReasons).toContain("non-openclaw-owner");
+      await expect(fs.access(falseLiveLock)).rejects.toThrow();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps fresh live .jsonl lock files with OpenClaw or unknown owners", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-lock-"));
     const sessionsDir = path.join(root, "sessions");
@@ -462,6 +498,7 @@ describe("acquireSessionWriteLock", () => {
 
     const nowMs = Date.now();
     const openclawLock = path.join(sessionsDir, "openclaw-live.jsonl.lock");
+    const gatewayLock = path.join(sessionsDir, "gateway-live.jsonl.lock");
     const unknownLock = path.join(sessionsDir, "unknown-live.jsonl.lock");
 
     try {
@@ -485,6 +522,26 @@ describe("acquireSessionWriteLock", () => {
       await expect(fs.access(openclawLock)).resolves.toBeUndefined();
 
       await fs.rm(openclawLock, { force: true });
+      await fs.writeFile(
+        gatewayLock,
+        JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date(nowMs).toISOString(),
+        }),
+        "utf8",
+      );
+      const gatewayResult = await cleanStaleLockFiles({
+        sessionsDir,
+        staleMs: 30_000,
+        nowMs,
+        removeStale: true,
+        readOwnerProcessArgs: () => ["node", "dist/index.js", "gateway", "run"],
+      });
+
+      expect(gatewayResult.cleaned).toEqual([]);
+      await expect(fs.access(gatewayLock)).resolves.toBeUndefined();
+
+      await fs.rm(gatewayLock, { force: true });
       await fs.writeFile(
         unknownLock,
         JSON.stringify({
